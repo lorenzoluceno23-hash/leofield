@@ -210,7 +210,7 @@ function AuthScreen() {
               onClick={() => { setError(''); setInfo(''); setMode(mode === 'login' ? 'signup' : 'login'); }}
               style={{ background: 'transparent', border: 'none', color: 'rgba(255,255,255,0.7)', fontSize: 13, marginTop: 4, cursor: 'pointer', padding: 8 }}
             >
-              {mode === 'login' ? 'Don't have an account? Sign up' : 'Already have an account? Sign in'}
+              {mode === 'login' ? "Don't have an account? Sign up" : 'Already have an account? Sign in'}
             </button>
           </div>
         </div>
