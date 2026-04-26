@@ -283,9 +283,12 @@ function AuthScreen() {
             <div className="login-descriptor">On Field &amp; Site Management</div>
             <div className="login-subtitle">Site Evolution</div>
             <p className="login-tagline">Building the future of logistics.</p>
+            <div className="login-version-badge">
+              <span className="login-version-dot"/>
+              VERSION {APP_VERSION}
+            </div>
             <div className="login-credit">
               <span>Created by</span> <strong>Lorenzo Luceno</strong>
-              <span className="login-version">v1.1</span>
             </div>
           </div>
 
@@ -330,23 +333,14 @@ function MainApp({ me, onLogout }) {
   const [toast, setToast] = useState(null);
   const [showWhatsNew, setShowWhatsNew] = useState(false);
 
-  // Show "What's new" modal at login if user hasn't seen the current version yet
+  // Show "What's new" modal on every login
   useEffect(() => {
     if (!me) return;
-    try {
-      const seen = localStorage.getItem('leofield_seen_version');
-      if (seen !== APP_VERSION) {
-        setShowWhatsNew(true);
-      }
-    } catch (e) {
-      // localStorage might be blocked in some embedded contexts; show anyway
-      setShowWhatsNew(true);
-    }
+    setShowWhatsNew(true);
   }, [me]);
 
   const dismissWhatsNew = () => {
     setShowWhatsNew(false);
-    try { localStorage.setItem('leofield_seen_version', APP_VERSION); } catch {}
   };
 
   const showToast = useCallback((msg, kind = 'info') => {
@@ -1037,6 +1031,7 @@ function ZoomableLayoutModal({
   const [imgSize, setImgSize] = useState(null); // { w, h } natural image size
   const [vpSize, setVpSize] = useState(null);   // { w, h } viewport box size
   const [fitScale, setFitScale] = useState(1);  // base scale to fit viewport
+  const [isPortrait, setIsPortrait] = useState(false);
   const viewportRef = useRef(null);
   const imgRef = useRef(null);
   const pointers = useRef(new Map());
@@ -1049,6 +1044,20 @@ function ZoomableLayoutModal({
   const MIN_SCALE = 0.6;  // a bit below initial fit
   const MAX_SCALE = 8;    // 8x zoom in
   const clampScale = (s) => Math.max(MIN_SCALE, Math.min(MAX_SCALE, s));
+
+  // Detect orientation
+  useEffect(() => {
+    const checkOrientation = () => {
+      setIsPortrait(window.innerHeight > window.innerWidth);
+    };
+    checkOrientation();
+    window.addEventListener('resize', checkOrientation);
+    window.addEventListener('orientationchange', checkOrientation);
+    return () => {
+      window.removeEventListener('resize', checkOrientation);
+      window.removeEventListener('orientationchange', checkOrientation);
+    };
+  }, []);
 
   // Measure viewport on mount + on resize
   useEffect(() => {
@@ -1069,8 +1078,24 @@ function ZoomableLayoutModal({
   // When image and viewport are both known, compute fit scale and center
   useEffect(() => {
     if (!imgSize || !vpSize) return;
-    const ratio = Math.min(vpSize.w / imgSize.w, vpSize.h / imgSize.h);
-    const baseScale = ratio * 0.95; // small padding so it doesn't touch edges
+    const aspectImg = imgSize.w / imgSize.h;       // image aspect ratio
+    const aspectVp  = vpSize.w / vpSize.h;         // viewport aspect ratio
+
+    // Strategy:
+    // - If image is much wider than viewport (panoramic layout): fit by HEIGHT
+    //   so the layout fills the screen vertically and the user can pan horizontally.
+    //   This is the BHX2 case — much wider than tall.
+    // - Otherwise: fit by min so the whole image is visible.
+    let baseScale;
+    if (aspectImg > aspectVp * 1.4) {
+      // Panoramic image — fit height
+      baseScale = vpSize.h / imgSize.h;
+    } else {
+      // Normal proportions — fit whole image with light padding
+      const ratio = Math.min(vpSize.w / imgSize.w, vpSize.h / imgSize.h);
+      baseScale = ratio * 0.95;
+    }
+
     const scaledW = imgSize.w * baseScale;
     const scaledH = imgSize.h * baseScale;
     setFitScale(baseScale);
@@ -1215,7 +1240,23 @@ function ZoomableLayoutModal({
   useEffect(() => {
     const prev = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
-    return () => { document.body.style.overflow = prev; };
+    // Try to lock orientation to landscape (works in PWA on Android Chrome,
+    // silently fails on iOS Safari and most desktop browsers — that's fine,
+    // we have the rotate prompt as fallback)
+    let didLock = false;
+    try {
+      if (screen.orientation && typeof screen.orientation.lock === 'function') {
+        screen.orientation.lock('landscape').then(() => { didLock = true; }).catch(() => {});
+      }
+    } catch (_) {}
+    return () => {
+      document.body.style.overflow = prev;
+      try {
+        if (didLock && screen.orientation && typeof screen.orientation.unlock === 'function') {
+          screen.orientation.unlock();
+        }
+      } catch (_) {}
+    };
   }, []);
 
   // Final transform: combine fit scale + user view scale
@@ -1224,6 +1265,20 @@ function ZoomableLayoutModal({
 
   return (
     <div className="zoom-modal-backdrop">
+      {isPortrait && (
+        <div className="rotate-prompt">
+          <div className="rotate-prompt-inner">
+            <svg width="64" height="64" viewBox="0 0 64 64" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="rotate-icon">
+              <rect x="14" y="6" width="20" height="36" rx="3"/>
+              <line x1="20" y1="36" x2="28" y2="36"/>
+              <path d="M40 22 Q 50 22, 50 32 L 50 48" />
+              <polyline points="46,44 50,48 54,44"/>
+            </svg>
+            <div className="rotate-title">Rotate your phone</div>
+            <div className="rotate-subtitle">Turn it sideways for the best layout view</div>
+          </div>
+        </div>
+      )}
       <div className="zoom-header">
         <button className="zoom-icon-btn" onClick={onClose} aria-label="Close"><X size={20}/></button>
         <div className="zoom-title">{title}</div>
@@ -2209,7 +2264,7 @@ function StyleTag() {
       .login-subtitle { font-size: 22px; font-weight: 500; letter-spacing: 0.02em; color: var(--leo-red); margin: 0 0 10px; text-shadow: 0 2px 12px rgba(0,0,0,0.6); }
       .login-tagline { color: rgba(255,255,255,0.72); font-size: 14px; margin: 0; max-width: 360px; letter-spacing: 0.03em; text-shadow: 0 2px 10px rgba(0,0,0,0.6); }
       .login-credit {
-        margin-top: 22px;
+        margin-top: 14px;
         font-family: 'IBM Plex Mono', monospace;
         font-size: 10px;
         letter-spacing: 0.18em;
@@ -2225,15 +2280,33 @@ function StyleTag() {
         font-weight: 500;
         letter-spacing: 0.08em;
       }
-      .login-version {
-        margin-left: auto;
-        padding: 3px 8px;
-        border-radius: 999px;
-        background: rgba(227,6,19,0.15);
-        color: var(--leo-red);
-        border: 1px solid rgba(227,6,19,0.3);
-        font-weight: 600;
-        letter-spacing: 0.1em;
+      .login-version-badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 10px;
+        margin-top: 24px;
+        padding: 10px 18px;
+        background: linear-gradient(135deg, rgba(227,6,19,0.45) 0%, rgba(227,6,19,0.2) 100%);
+        border: 1.5px solid rgba(227,6,19,0.7);
+        border-radius: 8px;
+        color: #fff;
+        font-family: 'IBM Plex Mono', monospace;
+        font-size: 14px;
+        font-weight: 700;
+        letter-spacing: 0.25em;
+        box-shadow:
+          0 0 32px rgba(227,6,19,0.45),
+          0 0 0 1px rgba(255,255,255,0.06) inset,
+          0 4px 16px rgba(0,0,0,0.4);
+        text-shadow: 0 2px 10px rgba(0,0,0,0.7);
+        text-transform: uppercase;
+      }
+      .login-version-dot {
+        width: 10px; height: 10px;
+        border-radius: 50%;
+        background: #ff3344;
+        box-shadow: 0 0 16px #ff3344, 0 0 4px #fff;
+        animation: pulseDot 1.4s ease-in-out infinite;
       }
 
       .login-form { display: flex; flex-direction: column; gap: 10px; }
@@ -2369,6 +2442,49 @@ function StyleTag() {
         border: 1px solid rgba(255,255,255,0.12);
         display: inline-flex; align-items: center; gap: 5px;
         pointer-events: none;
+      }
+
+      /* ===== Rotate Phone Prompt (in zoom modal) ===== */
+      .rotate-prompt {
+        position: absolute;
+        inset: 0;
+        z-index: 10;
+        background: rgba(11, 13, 16, 0.96);
+        backdrop-filter: blur(12px);
+        -webkit-backdrop-filter: blur(12px);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 24px;
+        animation: whatsnewFadeIn 0.2s ease-out;
+      }
+      .rotate-prompt-inner {
+        text-align: center;
+        max-width: 280px;
+        color: var(--text);
+      }
+      .rotate-icon {
+        color: var(--leo-red);
+        margin: 0 auto 18px;
+        animation: rotatePhoneAnim 2s ease-in-out infinite;
+        transform-origin: 50% 60%;
+        filter: drop-shadow(0 0 16px rgba(227,6,19,0.4));
+      }
+      @keyframes rotatePhoneAnim {
+        0%, 30%   { transform: rotate(0deg); }
+        65%, 100% { transform: rotate(-90deg); }
+      }
+      .rotate-title {
+        font-size: 18px;
+        font-weight: 600;
+        letter-spacing: -0.01em;
+        color: var(--text);
+        margin-bottom: 8px;
+      }
+      .rotate-subtitle {
+        font-size: 13px;
+        color: var(--text-dim);
+        line-height: 1.5;
       }
 
       /* ===== What's New Modal ===== */
