@@ -1,4 +1,4 @@
-/*. =============================================================
+/* =============================================================
    LEOFIELD v1.1 — WORK IN PROGRESS, do NOT deploy as-is
    ============================================================= 
 
@@ -2283,30 +2283,26 @@ function StyleTag() {
       .login-version-badge {
         display: inline-flex;
         align-items: center;
-        gap: 10px;
-        margin-top: 24px;
-        padding: 10px 18px;
-        background: linear-gradient(135deg, rgba(227,6,19,0.45) 0%, rgba(227,6,19,0.2) 100%);
-        border: 1.5px solid rgba(227,6,19,0.7);
-        border-radius: 8px;
+        gap: 8px;
+        margin-top: 22px;
+        padding: 8px 14px;
+        background: linear-gradient(135deg, rgba(227,6,19,0.25) 0%, rgba(227,6,19,0.12) 100%);
+        border: 1px solid rgba(227,6,19,0.5);
+        border-radius: 999px;
         color: #fff;
         font-family: 'IBM Plex Mono', monospace;
-        font-size: 14px;
-        font-weight: 700;
-        letter-spacing: 0.25em;
-        box-shadow:
-          0 0 32px rgba(227,6,19,0.45),
-          0 0 0 1px rgba(255,255,255,0.06) inset,
-          0 4px 16px rgba(0,0,0,0.4);
-        text-shadow: 0 2px 10px rgba(0,0,0,0.7);
-        text-transform: uppercase;
+        font-size: 12px;
+        font-weight: 600;
+        letter-spacing: 0.2em;
+        box-shadow: 0 0 24px rgba(227,6,19,0.3), 0 0 0 1px rgba(255,255,255,0.04) inset;
+        text-shadow: 0 1px 8px rgba(0,0,0,0.6);
       }
       .login-version-dot {
-        width: 10px; height: 10px;
+        width: 8px; height: 8px;
         border-radius: 50%;
-        background: #ff3344;
-        box-shadow: 0 0 16px #ff3344, 0 0 4px #fff;
-        animation: pulseDot 1.4s ease-in-out infinite;
+        background: var(--leo-red);
+        box-shadow: 0 0 12px var(--leo-red);
+        animation: pulseDot 1.6s ease-in-out infinite;
       }
 
       .login-form { display: flex; flex-direction: column; gap: 10px; }
