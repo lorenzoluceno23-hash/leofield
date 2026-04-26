@@ -1,10 +1,62 @@
+/* =============================================================
+   LEOFIELD v1.1 — WORK IN PROGRESS, do NOT deploy as-is
+   ============================================================= 
+
+   STATO DEL FILE (lavoro interrotto a metà):
+   
+   ✅ FATTO:
+   - Login screen con "Created by Lorenzo Luceno" + badge v1.1
+   - Topbar mostra ★ FOUNDER / ◆ ADMIN basato su user.level
+   - ZoomableLayoutModal riscritto per fullscreen vero con auto-fit 
+     dinamico (calcola dimensioni viewport + immagine, riempie schermo)
+   - NewSnagScreen: state assignedUserId al posto di assignedCompany
+   - Step 5 del wizard ha <select> con optgroup Leonardo / Vendor
+   - assignableUsers calcolato con permessi corretti (Leo=tutti, 
+     vendor admin = solo se stesso)
+
+   ⏳ DA FINIRE PER CHIUDERE v1.1:
+   1. createSnag in MainApp deve salvare anche assigned_to (uuid utente)
+      → riga ~295 dove c'è "assigned_company: data.assignedCompany,"
+      manca "assigned_to: data.assignedUserId,"
+   2. SnagScreen: mostrare il nome dell'utente assegnato 
+      (cercare snag.assigned_to in users) oltre alla company
+   3. UsersScreen: aggiungere bottoni "Promote to admin", "Demote 
+      to member", "Delete account" rispettando i permessi:
+         - founder può promuovere/demottare/cancellare CHIUNQUE tranne sé
+         - admin Leonardo può promuovere/demottare member↔admin (no founder)
+         - admin Leonardo può cancellare solo member (mai admin/founder)
+         - admin vendor stessa cosa ma su altri vendor
+         - chiamate via supabase.from('profiles').update({level:'admin'})
+   4. ProjectsScreen / ProjectScreen: il FAB "+" per creare snag deve 
+      apparire anche per vendor con level admin/founder
+      (ora c'è solo `if (isLeo)` → cambiare in 
+       `if (isLeo || (user.role==='vendor' && (user.level==='admin'||user.level==='founder')))`)
+   5. Cambiare il FAB anche basato su: il vendor admin deve vedere 
+      la lista users solo della sua company (non Leonardo)
+   6. Verificare che sign-up assegni level='member' di default 
+      (il trigger DB lo fa già — vedi migration_v1_1.sql)
+   7. Test sintassi + zip finale
+
+   ⚠️ PRE-REQUISITO PRIMA DEL DEPLOY:
+   Eseguire `migration_v1_1.sql` sul Supabase del progetto.
+   Lo script aggiunge: campo profiles.level, profiles.email_verified_at,
+   campo snags.assigned_to, nuove RLS policies, trigger protect_founder,
+   e promuove Lorenzo Luceno (lorenzo.luceno%@leonardo.com) a founder.
+
+   FILE BASE: presente su GitHub leofield/main alla data 19 Apr 2026.
+   Database Supabase: https://rptbuamczgoxjadenqrf.supabase.co
+   Deploy live (vecchia versione 1.0): https://leofield.netlify.app
+*/
+
+
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import * as XLSX from 'xlsx';
 import {
   Camera, ArrowLeft, Plus, Check, X, AlertCircle, Clock, CheckCircle2,
   Users, Settings, LogOut, MapPin, FileImage, ChevronRight, Building2,
   Trash2, Edit3, Shield, Briefcase, Upload, RotateCcw, Target, Download,
-  Mail, KeyRound, UserPlus, Loader2, ZoomIn, ZoomOut, Maximize2, Move
+  Mail, KeyRound, UserPlus, Loader2, ZoomIn, ZoomOut, Maximize2, Move,
+  Sparkles, UserCog, ListChecks, Bug
 } from 'lucide-react';
 import { supabase, dataUrlToBlob, getSignedUrl, MEDIA_BUCKET } from './supabase';
 import { ASSET_LOGO, ASSET_LAYOUT_PRESET_BHX2, ASSET_FRAMES } from './assets';
@@ -16,6 +68,50 @@ import { ASSET_LOGO, ASSET_LAYOUT_PRESET_BHX2, ASSET_FRAMES } from './assets';
 
 // ---------- UTILITIES ----------
 const uid = () => (crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`);
+
+// ============================================================
+// VERSION & PATCH NOTES
+// ============================================================
+const APP_VERSION = '1.1.0';
+
+const PATCH_NOTES = {
+  version: APP_VERSION,
+  title: "What's new in v1.1",
+  subtitle: 'Release · April 2026',
+  items: [
+    {
+      icon: 'Bug',
+      title: 'Fixed: layout no longer cropped on mobile',
+      detail: 'The full-screen modal now auto-fits the entire layout to your device, regardless of orientation. Previously the image stayed small even at 400% zoom — that bug is gone.',
+    },
+    {
+      icon: 'Maximize2',
+      title: 'True full-screen layout viewer',
+      detail: 'Tap the points map or the layout in the snag wizard to open it edge-to-edge. Pinch to zoom up to 800%, drag to pan, tap to place a marker or open an existing one.',
+    },
+    {
+      icon: 'UserCog',
+      title: 'Three-tier permission system',
+      detail: 'Users now have three levels: Founder, Admin and Member. Founder is untouchable. Admins (Leonardo or vendor) can promote, demote and remove members. Permissions show as ★ and ◆ badges next to names.',
+    },
+    {
+      icon: 'UserPlus',
+      title: 'Vendor admins can create snags',
+      detail: 'A vendor promoted to admin can now open snags too — auto-assigned to themselves. Useful for self-reporting issues found during their own intervention.',
+    },
+    {
+      icon: 'Users',
+      title: 'Assign snags to a specific person',
+      detail: 'When creating a snag, the "Assign to" dropdown now lists actual people (Leonardo + project vendors), grouped by company. The previous version only let you pick a company.',
+    },
+    {
+      icon: 'ListChecks',
+      title: 'Excel export — new column',
+      detail: 'The exported file now includes both "Assigned company" and "Assigned user" so reports show who exactly is responsible.',
+    },
+  ],
+};
+
 const fmtDate = (iso) => {
   if (!iso) return '—';
   const d = new Date(iso);
@@ -187,6 +283,10 @@ function AuthScreen() {
             <div className="login-descriptor">On Field &amp; Site Management</div>
             <div className="login-subtitle">Site Evolution</div>
             <p className="login-tagline">Building the future of logistics.</p>
+            <div className="login-credit">
+              <span>Created by</span> <strong>Lorenzo Luceno</strong>
+              <span className="login-version">v1.1</span>
+            </div>
           </div>
 
           <div className="login-form">
@@ -228,6 +328,26 @@ function MainApp({ me, onLogout }) {
   const [snags, setSnags] = useState([]);
   const [navStack, setNavStack] = useState([{ screen: 'projects', params: {} }]);
   const [toast, setToast] = useState(null);
+  const [showWhatsNew, setShowWhatsNew] = useState(false);
+
+  // Show "What's new" modal at login if user hasn't seen the current version yet
+  useEffect(() => {
+    if (!me) return;
+    try {
+      const seen = localStorage.getItem('leofield_seen_version');
+      if (seen !== APP_VERSION) {
+        setShowWhatsNew(true);
+      }
+    } catch (e) {
+      // localStorage might be blocked in some embedded contexts; show anyway
+      setShowWhatsNew(true);
+    }
+  }, [me]);
+
+  const dismissWhatsNew = () => {
+    setShowWhatsNew(false);
+    try { localStorage.setItem('leofield_seen_version', APP_VERSION); } catch {}
+  };
 
   const showToast = useCallback((msg, kind = 'info') => {
     setToast({ msg, kind, id: Date.now() });
@@ -289,6 +409,7 @@ function MainApp({ me, onLogout }) {
         status: 'open',
         created_by: me.id,
         assigned_company: data.assignedCompany,
+        assigned_to: data.assignedUserId || null,
         history: [{ at: new Date().toISOString(), by: me.id, action: 'created' }],
       });
       if (error) throw error;
@@ -412,6 +533,23 @@ function MainApp({ me, onLogout }) {
     reset('projects');
   }
 
+  async function setUserLevel(userId, newLevel) {
+    const { error } = await supabase.from('profiles').update({ level: newLevel }).eq('id', userId);
+    if (error) { showToast('Error: ' + error.message, 'error'); return; }
+    showToast(newLevel === 'admin' ? 'User promoted to admin' : 'User demoted to member', 'success');
+    await loadUsers();
+  }
+
+  async function deleteUser(userId) {
+    // Note: this removes the profile row. The auth.users entry remains but will be
+    // recreated on next sign-in via the handle_new_user trigger. For full deletion
+    // an admin must remove the user from Supabase Auth panel as well.
+    const { error } = await supabase.from('profiles').delete().eq('id', userId);
+    if (error) { showToast('Error: ' + error.message, 'error'); return; }
+    showToast('Account removed', 'info');
+    await loadUsers();
+  }
+
   return (
     <>
       <StyleTag />
@@ -479,10 +617,16 @@ function MainApp({ me, onLogout }) {
             />
           )}
           {currentScreen.screen === 'users' && (
-            <UsersScreen user={me} users={users} onBack={pop} onShowToast={showToast} />
+            <UsersScreen
+              user={me} users={users}
+              onBack={pop} onShowToast={showToast}
+              onSetLevel={setUserLevel}
+              onDeleteUser={deleteUser}
+            />
           )}
         </main>
         {toast && <Toast msg={toast.msg} kind={toast.kind} />}
+        {showWhatsNew && <WhatsNewModal onClose={dismissWhatsNew} />}
       </div>
     </>
   );
@@ -567,6 +711,8 @@ function TopBar({ screen, params, user, canGoBack, onBack, onLogout, projects, s
       <div style={{ textAlign: 'right' }}>
         <div style={{ fontSize: 11, color: 'var(--text-dim)' }}>{user.first_name}</div>
         <div style={{ fontSize: 9, color: user.role === 'leonardo' ? 'var(--accent)' : 'var(--text-faint)', fontWeight: 600, letterSpacing: '0.1em', textTransform: 'uppercase' }}>
+          {user.level === 'founder' && '★ '}
+          {user.level === 'admin' && '◆ '}
           {user.role === 'leonardo' ? 'Leonardo' : user.company}
         </div>
       </div>
@@ -577,12 +723,13 @@ function TopBar({ screen, params, user, canGoBack, onBack, onLogout, projects, s
 
 function ProjectsScreen({ user, projects, snags, onOpen, onNewProject, onUsers }) {
   const isLeo = user.role === 'leonardo';
+  const isVendorAdmin = user.role === 'vendor' && (user.level === 'admin' || user.level === 'founder');
   // server-side RLS already filters, but double-check
   const visible = isLeo ? projects : projects.filter(p => (p.vendors || []).includes(user.company));
 
   return (
     <div style={{ paddingTop: 20 }}>
-      {isLeo && (
+      {isLeo ? (
         <div style={{ display: 'flex', gap: 8, marginBottom: 20 }}>
           <button className="btn btn-ghost" onClick={onUsers} style={{ flex: 1 }}>
             <Users size={16} /> Users
@@ -591,7 +738,13 @@ function ProjectsScreen({ user, projects, snags, onOpen, onNewProject, onUsers }
             <Plus size={16} /> Project
           </button>
         </div>
-      )}
+      ) : isVendorAdmin ? (
+        <div style={{ display: 'flex', gap: 8, marginBottom: 20 }}>
+          <button className="btn btn-ghost" onClick={onUsers} style={{ flex: 1 }}>
+            <Users size={16} /> Users
+          </button>
+        </div>
+      ) : null}
 
       <div style={{ fontSize: 11, letterSpacing: '0.15em', color: 'var(--text-faint)', textTransform: 'uppercase', marginBottom: 12, fontWeight: 600 }}>
         {visible.length} {visible.length === 1 ? 'project' : 'projects'}
@@ -661,13 +814,15 @@ function ProjectScreen({ user, project, allSnags, users, onOpenSnag, onNewSnag, 
         const creator = users.find(u => u.id === s.created_by);
         const resolver = users.find(u => u.id === s.resolution?.by);
         const approver = users.find(u => u.id === s.approval?.by);
+        const assignee = users.find(u => u.id === s.assigned_to);
         return {
           'Code': s.code, 'Status': STATUS[s.status]?.label || s.status,
           'Title': s.title, 'Description': s.description || '',
           'Created by': creator ? `${creator.first_name} ${creator.last_name}` : '',
           'Creator company': creator?.company || '',
           'Created at': s.created_at ? new Date(s.created_at).toLocaleString('en-GB') : '',
-          'Assigned to': s.assigned_company || '',
+          'Assigned company': s.assigned_company || '',
+          'Assigned user': assignee ? `${assignee.first_name} ${assignee.last_name}` : '',
           'Resolved by': resolver ? `${resolver.first_name} ${resolver.last_name}` : '',
           'Resolved at': s.resolution?.at ? new Date(s.resolution.at).toLocaleString('en-GB') : '',
           'Resolution notes': s.resolution?.note || '',
@@ -679,7 +834,7 @@ function ProjectScreen({ user, project, allSnags, users, onOpenSnag, onNewSnag, 
       });
       if (rows.length === 0) { onShowToast('No data to export', 'info'); return; }
       const ws = XLSX.utils.json_to_sheet(rows);
-      ws['!cols'] = [{ wch: 12 }, { wch: 12 }, { wch: 30 }, { wch: 40 }, { wch: 20 }, { wch: 18 }, { wch: 20 }, { wch: 18 }, { wch: 20 }, { wch: 20 }, { wch: 30 }, { wch: 20 }, { wch: 20 }, { wch: 15 }, { wch: 15 }];
+      ws['!cols'] = [{ wch: 12 }, { wch: 12 }, { wch: 30 }, { wch: 40 }, { wch: 20 }, { wch: 18 }, { wch: 20 }, { wch: 18 }, { wch: 22 }, { wch: 20 }, { wch: 20 }, { wch: 30 }, { wch: 20 }, { wch: 20 }, { wch: 15 }, { wch: 15 }];
       const wb = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(wb, ws, 'Snag List');
       XLSX.writeFile(wb, `LEOFIELD_${project.name.replace(/\s+/g, '_')}_${new Date().toISOString().slice(0,10)}.xlsx`);
@@ -749,7 +904,7 @@ function ProjectScreen({ user, project, allSnags, users, onOpenSnag, onNewSnag, 
         </div>
       )}
 
-      {isLeo && (
+      {(isLeo || (user.role === 'vendor' && (user.level === 'admin' || user.level === 'founder'))) && (
         <div className="fab">
           <button onClick={onNewSnag} aria-label="New snag"><Plus size={24}/></button>
         </div>
@@ -870,15 +1025,18 @@ function PhotoMarkup({ image, mark, onChange, readOnly = false }) {
 // =============================================================
 function ZoomableLayoutModal({
   imageUrl,
-  markers = [],          // [{ id, mark: {x,y}, color, code }]
-  initialMark = null,    // for placement mode: incoming mark to display
-  onMarkChange = null,   // placement mode: called with {x,y} when user confirms
-  onMarkerClick = null,  // view mode: called with marker.id when marker tapped
+  markers = [],
+  initialMark = null,
+  onMarkChange = null,
+  onMarkerClick = null,
   onClose,
   title = 'Layout',
 }) {
   const [view, setView] = useState({ scale: 1, tx: 0, ty: 0 });
   const [draft, setDraft] = useState(initialMark);
+  const [imgSize, setImgSize] = useState(null); // { w, h } natural image size
+  const [vpSize, setVpSize] = useState(null);   // { w, h } viewport box size
+  const [fitScale, setFitScale] = useState(1);  // base scale to fit viewport
   const viewportRef = useRef(null);
   const imgRef = useRef(null);
   const pointers = useRef(new Map());
@@ -887,8 +1045,46 @@ function ZoomableLayoutModal({
 
   const isPlacing = onMarkChange !== null;
 
-  // Clamp scale
-  const clampScale = (s) => Math.max(0.5, Math.min(6, s));
+  // Clamp scale relative to fit
+  const MIN_SCALE = 0.6;  // a bit below initial fit
+  const MAX_SCALE = 8;    // 8x zoom in
+  const clampScale = (s) => Math.max(MIN_SCALE, Math.min(MAX_SCALE, s));
+
+  // Measure viewport on mount + on resize
+  useEffect(() => {
+    const measure = () => {
+      if (!viewportRef.current) return;
+      const r = viewportRef.current.getBoundingClientRect();
+      setVpSize({ w: r.width, h: r.height });
+    };
+    measure();
+    window.addEventListener('resize', measure);
+    window.addEventListener('orientationchange', measure);
+    return () => {
+      window.removeEventListener('resize', measure);
+      window.removeEventListener('orientationchange', measure);
+    };
+  }, []);
+
+  // When image and viewport are both known, compute fit scale and center
+  useEffect(() => {
+    if (!imgSize || !vpSize) return;
+    const ratio = Math.min(vpSize.w / imgSize.w, vpSize.h / imgSize.h);
+    const baseScale = ratio * 0.95; // small padding so it doesn't touch edges
+    const scaledW = imgSize.w * baseScale;
+    const scaledH = imgSize.h * baseScale;
+    setFitScale(baseScale);
+    setView({
+      scale: 1,
+      tx: (vpSize.w - scaledW) / 2,
+      ty: (vpSize.h - scaledH) / 2,
+    });
+  }, [imgSize, vpSize]);
+
+  const onImgLoad = (e) => {
+    const img = e.currentTarget;
+    setImgSize({ w: img.naturalWidth, h: img.naturalHeight });
+  };
 
   const onPointerDown = (e) => {
     viewportRef.current?.setPointerCapture?.(e.pointerId);
@@ -907,7 +1103,7 @@ function ZoomableLayoutModal({
         cx: (p1.x + p2.x) / 2,
         cy: (p1.y + p2.y) / 2,
       };
-      tapTracker.current = null; // two fingers → never a tap
+      tapTracker.current = null;
     }
   };
 
@@ -928,7 +1124,6 @@ function ZoomableLayoutModal({
       setView(v => {
         const newScale = clampScale(v.scale * ratio);
         const actualRatio = newScale / v.scale;
-        // Zoom around pinch center + apply pan from center delta
         return {
           scale: newScale,
           tx: newCx - (newCx - v.tx) * actualRatio + panDx,
@@ -937,7 +1132,6 @@ function ZoomableLayoutModal({
       });
       lastPinch.current = { dist: newDist, cx: newCx, cy: newCy };
     } else if (pointers.current.size === 1) {
-      // Pan with one finger
       const dx = e.clientX - prev.x;
       const dy = e.clientY - prev.y;
       setView(v => ({ ...v, tx: v.tx + dx, ty: v.ty + dy }));
@@ -959,7 +1153,6 @@ function ZoomableLayoutModal({
     if (isPlacing) {
       setDraft({ x, y });
     } else if (onMarkerClick && markers.length) {
-      // Find nearest marker within hit radius (in screen pixels)
       let closest = null, closestDist = Infinity;
       for (const m of markers) {
         const mx = rect.left + m.mark.x * rect.width;
@@ -987,18 +1180,23 @@ function ZoomableLayoutModal({
     }
   };
 
-  const reset = () => setView({ scale: 1, tx: 0, ty: 0 });
+  const reset = () => {
+    if (!imgSize || !vpSize) { setView({ scale: 1, tx: 0, ty: 0 }); return; }
+    const scaledW = imgSize.w * fitScale;
+    const scaledH = imgSize.h * fitScale;
+    setView({
+      scale: 1,
+      tx: (vpSize.w - scaledW) / 2,
+      ty: (vpSize.h - scaledH) / 2,
+    });
+  };
   const zoomIn = () => setView(v => {
     const newScale = clampScale(v.scale * 1.4);
     const actualRatio = newScale / v.scale;
     const vp = viewportRef.current?.getBoundingClientRect();
     if (!vp) return { ...v, scale: newScale };
     const cx = vp.width / 2, cy = vp.height / 2;
-    return {
-      scale: newScale,
-      tx: cx - (cx - v.tx) * actualRatio,
-      ty: cy - (cy - v.ty) * actualRatio,
-    };
+    return { scale: newScale, tx: cx - (cx - v.tx) * actualRatio, ty: cy - (cy - v.ty) * actualRatio };
   });
   const zoomOut = () => setView(v => {
     const newScale = clampScale(v.scale / 1.4);
@@ -1006,11 +1204,7 @@ function ZoomableLayoutModal({
     const vp = viewportRef.current?.getBoundingClientRect();
     if (!vp) return { ...v, scale: newScale };
     const cx = vp.width / 2, cy = vp.height / 2;
-    return {
-      scale: newScale,
-      tx: cx - (cx - v.tx) * actualRatio,
-      ty: cy - (cy - v.ty) * actualRatio,
-    };
+    return { scale: newScale, tx: cx - (cx - v.tx) * actualRatio, ty: cy - (cy - v.ty) * actualRatio };
   });
 
   const confirm = () => {
@@ -1018,12 +1212,15 @@ function ZoomableLayoutModal({
     onClose();
   };
 
-  // Prevent body scroll while open
   useEffect(() => {
     const prev = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
     return () => { document.body.style.overflow = prev; };
   }, []);
+
+  // Final transform: combine fit scale + user view scale
+  const totalScale = fitScale * view.scale;
+  const displayPct = Math.round(view.scale * 100);
 
   return (
     <div className="zoom-modal-backdrop">
@@ -1032,7 +1229,7 @@ function ZoomableLayoutModal({
         <div className="zoom-title">{title}</div>
         <div className="zoom-controls">
           <button className="zoom-icon-btn" onClick={zoomOut} aria-label="Zoom out"><ZoomOut size={18}/></button>
-          <button className="zoom-pct" onClick={reset}>{Math.round(view.scale * 100)}%</button>
+          <button className="zoom-pct" onClick={reset}>{displayPct}%</button>
           <button className="zoom-icon-btn" onClick={zoomIn} aria-label="Zoom in"><ZoomIn size={18}/></button>
         </div>
       </div>
@@ -1045,34 +1242,46 @@ function ZoomableLayoutModal({
         onPointerUp={onPointerUp}
         onPointerCancel={onPointerUp}
       >
-        <div
-          className="zoom-canvas"
-          style={{
-            transform: `translate(${view.tx}px, ${view.ty}px) scale(${view.scale})`,
-            transformOrigin: '0 0',
-          }}
-        >
-          <img ref={imgRef} src={imageUrl} alt="" draggable={false} />
-          <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="zoom-markers-svg">
-            {markers.map(m => (
-              <g key={m.id}>
-                <circle cx={m.mark.x * 100} cy={m.mark.y * 100} r={2.5} fill="none" stroke={m.color || '#ef4444'} strokeWidth="0.6" vectorEffect="non-scaling-stroke" className={m.status === 'open' ? 'marker-pulse' : ''}/>
-                <circle cx={m.mark.x * 100} cy={m.mark.y * 100} r={0.8} fill={m.color || '#ef4444'} />
-                {m.code && (
-                  <text x={m.mark.x * 100 + 3.5} y={m.mark.y * 100 + 1} fill={m.color || '#ef4444'} fontSize="2.8" fontFamily="IBM Plex Mono, monospace" fontWeight="600" style={{ paintOrder: 'stroke', stroke: '#000', strokeWidth: '0.8px' }}>{m.code}</text>
-                )}
-              </g>
-            ))}
-            {isPlacing && draft && (
-              <g>
-                <circle cx={draft.x * 100} cy={draft.y * 100} r={3.5} fill="none" stroke="#e30613" strokeWidth="1" vectorEffect="non-scaling-stroke" className="marker-pulse"/>
-                <circle cx={draft.x * 100} cy={draft.y * 100} r={1} fill="#e30613" />
-              </g>
-            )}
-          </svg>
-        </div>
+        {imgSize && vpSize ? (
+          <div
+            className="zoom-canvas"
+            style={{
+              width: imgSize.w,
+              height: imgSize.h,
+              transform: `translate(${view.tx}px, ${view.ty}px) scale(${totalScale})`,
+              transformOrigin: '0 0',
+            }}
+          >
+            <img ref={imgRef} src={imageUrl} alt="" draggable={false} />
+            <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="zoom-markers-svg">
+              {markers.map(m => (
+                <g key={m.id}>
+                  <circle cx={m.mark.x * 100} cy={m.mark.y * 100} r={2.5} fill="none" stroke={m.color || '#ef4444'} strokeWidth="0.6" vectorEffect="non-scaling-stroke" className={m.status === 'open' ? 'marker-pulse' : ''}/>
+                  <circle cx={m.mark.x * 100} cy={m.mark.y * 100} r={0.8} fill={m.color || '#ef4444'} />
+                  {m.code && (
+                    <text x={m.mark.x * 100 + 3.5} y={m.mark.y * 100 + 1} fill={m.color || '#ef4444'} fontSize="2.8" fontFamily="IBM Plex Mono, monospace" fontWeight="600" style={{ paintOrder: 'stroke', stroke: '#000', strokeWidth: '0.8px' }}>{m.code}</text>
+                  )}
+                </g>
+              ))}
+              {isPlacing && draft && (
+                <g>
+                  <circle cx={draft.x * 100} cy={draft.y * 100} r={3.5} fill="none" stroke="#e30613" strokeWidth="1" vectorEffect="non-scaling-stroke" className="marker-pulse"/>
+                  <circle cx={draft.x * 100} cy={draft.y * 100} r={1} fill="#e30613" />
+                </g>
+              )}
+            </svg>
+          </div>
+        ) : (
+          // Hidden bootstrap image to measure
+          <img
+            ref={imgRef}
+            src={imageUrl}
+            alt=""
+            onLoad={onImgLoad}
+            style={{ position: 'absolute', opacity: 0, pointerEvents: 'none' }}
+          />
+        )}
 
-        {/* Hint overlay */}
         <div className="zoom-hint">
           <Move size={12}/> {isPlacing ? 'Pinch to zoom · Tap to place marker' : 'Pinch to zoom · Tap a marker to open'}
         </div>
@@ -1128,9 +1337,40 @@ function NewSnagScreen({ user, project, allSnags, users, onCancel, onCreate }) {
   const [photo, setPhoto] = useState(null);
   const [photoMark, setPhotoMark] = useState(null);
   const [mark, setMark] = useState(null);
-  const [assignedCompany, setAssignedCompany] = useState(project?.vendors?.[0] || '');
+  const [assignedUserId, setAssignedUserId] = useState('');
   const [busy, setBusy] = useState(false);
   const layoutUrl = useSignedUrl(project?.layout_image_path);
+
+  // Build list of assignable users:
+  // - If creator is Leonardo: can assign to ANY user (Leonardo or vendor of this project)
+  // - If creator is vendor admin: can only assign to themselves
+  const isLeo = user.role === 'leonardo';
+  const isVendorAdmin = user.role === 'vendor' && (user.level === 'admin' || user.level === 'founder');
+
+  const assignableUsers = useMemo(() => {
+    if (isLeo) {
+      return users.filter(u =>
+        u.role === 'leonardo' ||
+        (u.role === 'vendor' && (project?.vendors || []).includes(u.company))
+      );
+    } else if (isVendorAdmin) {
+      return users.filter(u => u.id === user.id);
+    }
+    return [];
+  }, [users, project, isLeo, isVendorAdmin, user.id]);
+
+  // Default assigned to first vendor of the project (Leonardo) or self (vendor admin)
+  useEffect(() => {
+    if (!assignedUserId && assignableUsers.length > 0) {
+      if (isLeo) {
+        // prefer first vendor of the project, otherwise first user
+        const firstVendor = assignableUsers.find(u => u.role === 'vendor');
+        setAssignedUserId(firstVendor?.id || assignableUsers[0].id);
+      } else {
+        setAssignedUserId(user.id);
+      }
+    }
+  }, [assignableUsers, assignedUserId, isLeo, user.id]);
 
   if (!project) return <div className="empty" style={{ marginTop: 24 }}>Project not found.</div>;
   if (!project.layout_image_path) {
@@ -1159,10 +1399,17 @@ function NewSnagScreen({ user, project, allSnags, users, onCancel, onCreate }) {
   };
 
   const submit = () => {
-    if (!title.trim() || !photo || !mark || !assignedCompany || !photoMark) return;
+    if (!title.trim() || !photo || !mark || !assignedUserId || !photoMark) return;
+    const assignedUser = users.find(u => u.id === assignedUserId);
+    if (!assignedUser) return;
     const userProjectSnags = allSnags.filter(s => s.project_id === project.id && s.created_by === user.id);
     const code = generatePointCode(user, userProjectSnags);
-    onCreate({ code, projectId: project.id, title: title.trim(), description: description.trim(), photo, photoMark, mark, assignedCompany });
+    onCreate({
+      code, projectId: project.id, title: title.trim(), description: description.trim(),
+      photo, photoMark, mark,
+      assignedCompany: assignedUser.company,
+      assignedUserId: assignedUser.id,
+    });
   };
 
   return (
@@ -1242,9 +1489,22 @@ function NewSnagScreen({ user, project, allSnags, users, onCancel, onCreate }) {
         <div className="fadeIn">
           <h2 style={{ fontSize: 22, margin: '0 0 16px' }}>Assign and submit</h2>
           <div style={{ marginBottom: 20 }}>
-            <label>Assign to vendor</label>
-            <select value={assignedCompany} onChange={e => setAssignedCompany(e.target.value)}>
-              {(project.vendors || []).map(v => <option key={v} value={v}>{v}</option>)}
+            <label>Assign to</label>
+            <select value={assignedUserId} onChange={e => setAssignedUserId(e.target.value)}>
+              {assignableUsers.filter(u => u.role === 'leonardo').length > 0 && (
+                <optgroup label="Leonardo Spa">
+                  {assignableUsers.filter(u => u.role === 'leonardo').map(u => (
+                    <option key={u.id} value={u.id}>{u.first_name} {u.last_name}</option>
+                  ))}
+                </optgroup>
+              )}
+              {[...new Set(assignableUsers.filter(u => u.role === 'vendor').map(u => u.company))].map(company => (
+                <optgroup key={company} label={company}>
+                  {assignableUsers.filter(u => u.company === company).map(u => (
+                    <option key={u.id} value={u.id}>{u.first_name} {u.last_name}</option>
+                  ))}
+                </optgroup>
+              ))}
             </select>
           </div>
           <div className="card" style={{ marginBottom: 20 }}>
@@ -1281,9 +1541,12 @@ function SnagScreen({ user, users, projects, snag, onBack, onResolve, onApprove,
   const creator = users.find(u => u.id === snag.created_by);
   const resolver = users.find(u => u.id === snag.resolution?.by);
   const approver = users.find(u => u.id === snag.approval?.by);
+  const assignee = users.find(u => u.id === snag.assigned_to);
   const isLeo = user.role === 'leonardo';
+  // Vendor of the assigned company OR the user explicitly assigned can resolve
+  const isAssignedToMe = snag.assigned_to === user.id;
   const isVendorForThis = user.role === 'vendor' && user.company === snag.assigned_company;
-  const canResolve = isVendorForThis && snag.status === 'open';
+  const canResolve = (isVendorForThis || isAssignedToMe) && snag.status === 'open';
   const canApprove = isLeo && snag.status === 'fixed';
 
   const handleResolvePhoto = async (file) => {
@@ -1316,7 +1579,12 @@ function SnagScreen({ user, users, projects, snag, onBack, onResolve, onApprove,
       <h1 style={{ fontSize: 22, margin: '0 0 8px', lineHeight: 1.25 }}>{snag.title}</h1>
       <div style={{ fontSize: 12, color: 'var(--text-dim)', marginBottom: 20 }}>
         Created by {creator ? `${creator.first_name} ${creator.last_name}` : '—'} · {fmtDate(snag.created_at)}<br />
-        Assigned to <span style={{ color: 'var(--accent)' }}>{snag.assigned_company}</span>
+        Assigned to{' '}
+        <span style={{ color: 'var(--accent)' }}>
+          {assignee
+            ? `${assignee.first_name} ${assignee.last_name} · ${assignee.company}`
+            : snag.assigned_company}
+        </span>
       </div>
 
       {snag.description && (
@@ -1588,9 +1856,21 @@ function ProjectSettingsScreen({ project, user, users, onBack, onUpdate, onDelet
   );
 }
 
-function UsersScreen({ user, users, onBack, onShowToast }) {
+function UsersScreen({ user, users, onBack, onShowToast, onSetLevel, onDeleteUser }) {
   const leo = users.filter(u => u.role === 'leonardo');
   const vendors = users.filter(u => u.role === 'vendor');
+  const isFounder = user.level === 'founder';
+  const isAdmin = user.level === 'admin' || isFounder;
+
+  // Group vendors by company
+  const vendorByCompany = useMemo(() => {
+    const map = {};
+    for (const v of vendors) {
+      if (!map[v.company]) map[v.company] = [];
+      map[v.company].push(v);
+    }
+    return map;
+  }, [vendors]);
 
   return (
     <div style={{ paddingTop: 20 }}>
@@ -1598,32 +1878,81 @@ function UsersScreen({ user, users, onBack, onShowToast }) {
         <div style={{ display: 'flex', gap: 12, alignItems: 'flex-start' }}>
           <UserPlus color="var(--accent)" size={22} />
           <div style={{ fontSize: 13, lineHeight: 1.5 }}>
-            <div style={{ fontWeight: 600, marginBottom: 4, color: 'var(--text)' }}>How to add users</div>
-            Share the app URL. New users sign up themselves from the login page. Those using <strong>@leonardo.com</strong> emails automatically become Leonardo admins. Others are vendors and specify their own company.
+            <div style={{ fontWeight: 600, marginBottom: 4, color: 'var(--text)' }}>How permissions work</div>
+            <strong>Founder ★</strong> can promote, demote and delete anyone (including admins). <strong>Admin ◆</strong> can promote members to admin and delete members. <strong>Members</strong> can only use the app. New sign-ups join as members.
           </div>
         </div>
       </div>
+
       <div style={{ fontSize: 11, letterSpacing: '0.15em', color: 'var(--text-faint)', textTransform: 'uppercase', marginBottom: 10, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}>
         <Shield size={12}/> Leonardo Spa ({leo.length})
       </div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 24 }}>
-        {leo.map(u => <UserRow key={u.id} u={u} currentUser={user} />)}
+        {leo.map(u => (
+          <UserRow
+            key={u.id} u={u} currentUser={user}
+            isFounder={isFounder} isAdmin={isAdmin}
+            onSetLevel={onSetLevel} onDeleteUser={onDeleteUser}
+          />
+        ))}
       </div>
-      <div style={{ fontSize: 11, letterSpacing: '0.15em', color: 'var(--text-faint)', textTransform: 'uppercase', marginBottom: 10, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}>
-        <Building2 size={12}/> Vendors ({vendors.length})
-      </div>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-        {vendors.map(u => <UserRow key={u.id} u={u} currentUser={user} />)}
-      </div>
+
+      {Object.keys(vendorByCompany).length > 0 && (
+        <>
+          <div style={{ fontSize: 11, letterSpacing: '0.15em', color: 'var(--text-faint)', textTransform: 'uppercase', marginBottom: 10, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}>
+            <Building2 size={12}/> Vendors ({vendors.length})
+          </div>
+          {Object.entries(vendorByCompany).map(([company, list]) => (
+            <div key={company} style={{ marginBottom: 18 }}>
+              <div style={{ fontSize: 11, color: 'var(--text-dim)', textTransform: 'uppercase', letterSpacing: '0.1em', fontWeight: 600, marginBottom: 6, paddingLeft: 4 }}>
+                {company} ({list.length})
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                {list.map(u => (
+                  <UserRow
+                    key={u.id} u={u} currentUser={user}
+                    isFounder={isFounder} isAdmin={isAdmin}
+                    onSetLevel={onSetLevel} onDeleteUser={onDeleteUser}
+                  />
+                ))}
+              </div>
+            </div>
+          ))}
+        </>
+      )}
     </div>
   );
 }
 
-function UserRow({ u, currentUser }) {
+function UserRow({ u, currentUser, isFounder, isAdmin, onSetLevel, onDeleteUser }) {
   const initials = ((u.first_name?.[0] || '') + (u.last_name?.[0] || '')).toUpperCase();
   const isMe = u.id === currentUser.id;
+  const isTheirFounder = u.level === 'founder';
+  const isTheirAdmin = u.level === 'admin';
+  const isTheirMember = u.level === 'member' || !u.level;
+
+  // Permission rules:
+  // - Nobody can act on themselves from this screen
+  // - Nobody can act on a founder
+  // - Founder can do anything to admins and members
+  // - Admin can: promote member→admin, demote admin→member (NOT founder), delete members
+  // - Member: no buttons
+  const canPromote =
+    !isMe && !isTheirFounder && isTheirMember && isAdmin;
+  const canDemote =
+    !isMe && !isTheirFounder && isTheirAdmin && (isFounder || isAdmin);
+  const canDelete =
+    !isMe && !isTheirFounder && (
+      isFounder ||
+      (isAdmin && isTheirMember)
+    );
+
+  const levelBadge = isTheirFounder ? '★ FOUNDER'
+    : isTheirAdmin ? '◆ ADMIN'
+    : null;
+
   return (
-    <div className="card card-row" style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+    <div className="card card-row" style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
       <div style={{
         width: 40, height: 40, borderRadius: 20,
         background: u.role === 'leonardo' ? 'var(--accent-soft)' : 'var(--surface-2)',
@@ -1632,8 +1961,102 @@ function UserRow({ u, currentUser }) {
         fontWeight: 600, fontSize: 13, flexShrink: 0
       }}>{initials}</div>
       <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ fontWeight: 600, fontSize: 14 }}>{u.first_name} {u.last_name} {isMe && <span style={{ color: 'var(--text-faint)', fontSize: 11, fontWeight: 400 }}>· you</span>}</div>
-        <div style={{ fontSize: 12, color: 'var(--text-dim)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{u.email} · {u.company}</div>
+        <div style={{ fontWeight: 600, fontSize: 14, display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+          <span>{u.first_name} {u.last_name}</span>
+          {isMe && <span style={{ color: 'var(--text-faint)', fontSize: 11, fontWeight: 400 }}>· you</span>}
+          {levelBadge && (
+            <span className="mono" style={{
+              fontSize: 9, letterSpacing: '0.1em',
+              padding: '2px 6px', borderRadius: 4,
+              background: isTheirFounder ? 'rgba(227,6,19,0.18)' : 'rgba(255,255,255,0.06)',
+              color: isTheirFounder ? 'var(--accent)' : 'rgba(255,255,255,0.75)',
+              border: isTheirFounder ? '1px solid rgba(227,6,19,0.35)' : '1px solid var(--border)',
+            }}>{levelBadge}</span>
+          )}
+        </div>
+        <div style={{ fontSize: 12, color: 'var(--text-dim)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{u.email}</div>
+      </div>
+
+      {(canPromote || canDemote || canDelete) && (
+        <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
+          {canPromote && (
+            <button
+              className="icon-btn"
+              title="Promote to admin"
+              onClick={() => { if (confirm(`Promote ${u.first_name} ${u.last_name} to admin?`)) onSetLevel(u.id, 'admin'); }}
+              style={{ background: 'rgba(227,6,19,0.1)', color: 'var(--accent)' }}
+            >
+              <Shield size={16}/>
+            </button>
+          )}
+          {canDemote && (
+            <button
+              className="icon-btn"
+              title="Demote to member"
+              onClick={() => { if (confirm(`Demote ${u.first_name} ${u.last_name} to member?`)) onSetLevel(u.id, 'member'); }}
+              style={{ background: 'rgba(245,158,11,0.1)', color: '#f59e0b' }}
+            >
+              <RotateCcw size={16}/>
+            </button>
+          )}
+          {canDelete && (
+            <button
+              className="icon-btn"
+              title="Delete account"
+              onClick={() => { if (confirm(`Delete ${u.first_name} ${u.last_name}'s account? This cannot be undone.`)) onDeleteUser(u.id); }}
+              style={{ background: 'rgba(239,68,68,0.1)', color: '#ef4444' }}
+            >
+              <Trash2 size={16}/>
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function WhatsNewModal({ onClose }) {
+  const iconMap = {
+    Sparkles, Bug, Maximize2, UserCog, UserPlus, Users, ListChecks, Shield, Camera,
+  };
+  // Lock body scroll while modal is open
+  useEffect(() => {
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => { document.body.style.overflow = prev; };
+  }, []);
+
+  return (
+    <div className="whatsnew-backdrop" onClick={onClose}>
+      <div className="whatsnew-modal" onClick={e => e.stopPropagation()}>
+        <button className="whatsnew-close" onClick={onClose} aria-label="Close"><X size={20}/></button>
+        <div className="whatsnew-header">
+          <div className="whatsnew-version-pill">v{PATCH_NOTES.version}</div>
+          <div className="whatsnew-eyebrow">{PATCH_NOTES.subtitle}</div>
+          <h2 className="whatsnew-title">{PATCH_NOTES.title}</h2>
+          <p className="whatsnew-lead">A few improvements based on field feedback. Tap any item to read the detail.</p>
+        </div>
+
+        <div className="whatsnew-list">
+          {PATCH_NOTES.items.map((item, i) => {
+            const Ico = iconMap[item.icon] || Sparkles;
+            return (
+              <div key={i} className="whatsnew-item">
+                <div className="whatsnew-item-icon"><Ico size={18}/></div>
+                <div className="whatsnew-item-body">
+                  <div className="whatsnew-item-title">{item.title}</div>
+                  <div className="whatsnew-item-detail">{item.detail}</div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        <div className="whatsnew-footer">
+          <button className="btn btn-primary" onClick={onClose} style={{ width: '100%' }}>
+            Got it
+          </button>
+        </div>
       </div>
     </div>
   );
@@ -1785,6 +2208,33 @@ function StyleTag() {
       .login-descriptor::after { content: ''; position: absolute; left: 0; bottom: 0; width: 36px; height: 2px; background: var(--leo-red); box-shadow: 0 0 12px rgba(227,6,19,0.6); }
       .login-subtitle { font-size: 22px; font-weight: 500; letter-spacing: 0.02em; color: var(--leo-red); margin: 0 0 10px; text-shadow: 0 2px 12px rgba(0,0,0,0.6); }
       .login-tagline { color: rgba(255,255,255,0.72); font-size: 14px; margin: 0; max-width: 360px; letter-spacing: 0.03em; text-shadow: 0 2px 10px rgba(0,0,0,0.6); }
+      .login-credit {
+        margin-top: 22px;
+        font-family: 'IBM Plex Mono', monospace;
+        font-size: 10px;
+        letter-spacing: 0.18em;
+        color: rgba(255,255,255,0.45);
+        text-transform: uppercase;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        flex-wrap: wrap;
+      }
+      .login-credit strong {
+        color: rgba(255,255,255,0.85);
+        font-weight: 500;
+        letter-spacing: 0.08em;
+      }
+      .login-version {
+        margin-left: auto;
+        padding: 3px 8px;
+        border-radius: 999px;
+        background: rgba(227,6,19,0.15);
+        color: var(--leo-red);
+        border: 1px solid rgba(227,6,19,0.3);
+        font-weight: 600;
+        letter-spacing: 0.1em;
+      }
 
       .login-form { display: flex; flex-direction: column; gap: 10px; }
       .login-form input { background: rgba(0,0,0,0.55); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); border: 1px solid rgba(255,255,255,0.15); color: #fff; padding: 14px 16px; border-radius: 10px; font-size: 15px; outline: none; transition: all .2s ease; flex: 1; }
@@ -1862,10 +2312,7 @@ function StyleTag() {
       }
       .zoom-canvas {
         position: absolute;
-        top: 50%; left: 50%;
-        margin-top: calc(-1 * min(42vh, 40vw));
-        margin-left: -45vw;
-        width: 90vw; max-width: 900px;
+        top: 0; left: 0;
         will-change: transform;
       }
       .zoom-canvas img {
@@ -1922,6 +2369,127 @@ function StyleTag() {
         border: 1px solid rgba(255,255,255,0.12);
         display: inline-flex; align-items: center; gap: 5px;
         pointer-events: none;
+      }
+
+      /* ===== What's New Modal ===== */
+      .whatsnew-backdrop {
+        position: fixed; inset: 0; z-index: 200;
+        background: rgba(0, 0, 0, 0.75);
+        backdrop-filter: blur(8px);
+        -webkit-backdrop-filter: blur(8px);
+        display: flex; align-items: center; justify-content: center;
+        padding: 20px;
+        animation: whatsnewFadeIn 0.25s ease-out;
+      }
+      @keyframes whatsnewFadeIn {
+        from { opacity: 0; }
+        to   { opacity: 1; }
+      }
+      .whatsnew-modal {
+        position: relative;
+        width: 100%; max-width: 480px;
+        max-height: calc(100dvh - 40px);
+        background: linear-gradient(180deg, #181c25 0%, #11141b 100%);
+        border: 1px solid var(--border-strong);
+        border-radius: 18px;
+        overflow: hidden;
+        display: flex; flex-direction: column;
+        box-shadow:
+          0 24px 64px rgba(0, 0, 0, 0.6),
+          0 0 0 1px rgba(255, 255, 255, 0.04) inset,
+          0 0 80px rgba(227, 6, 19, 0.08);
+        animation: whatsnewSlideUp 0.3s cubic-bezier(0.2, 0.9, 0.3, 1.2);
+      }
+      @keyframes whatsnewSlideUp {
+        from { opacity: 0; transform: translateY(20px) scale(0.96); }
+        to   { opacity: 1; transform: translateY(0) scale(1); }
+      }
+      .whatsnew-close {
+        position: absolute; top: 14px; right: 14px;
+        background: rgba(255,255,255,0.06);
+        border: 1px solid rgba(255,255,255,0.08);
+        color: var(--text-dim);
+        width: 32px; height: 32px; border-radius: 8px;
+        display: flex; align-items: center; justify-content: center;
+        cursor: pointer; z-index: 2;
+        transition: all .15s ease;
+      }
+      .whatsnew-close:hover { background: rgba(255,255,255,0.1); color: var(--text); }
+      .whatsnew-header {
+        padding: 28px 24px 20px;
+        border-bottom: 1px solid var(--border);
+        background:
+          radial-gradient(ellipse at top, rgba(227,6,19,0.12) 0%, transparent 70%);
+      }
+      .whatsnew-version-pill {
+        display: inline-block;
+        font-family: 'IBM Plex Mono', monospace;
+        font-size: 10px; font-weight: 600;
+        letter-spacing: 0.15em;
+        color: var(--leo-red);
+        background: rgba(227,6,19,0.12);
+        border: 1px solid rgba(227,6,19,0.3);
+        padding: 4px 10px; border-radius: 999px;
+        margin-bottom: 12px;
+      }
+      .whatsnew-eyebrow {
+        font-family: 'IBM Plex Mono', monospace;
+        font-size: 10px; letter-spacing: 0.2em;
+        color: var(--text-faint);
+        text-transform: uppercase;
+        margin-bottom: 6px;
+      }
+      .whatsnew-title {
+        font-size: 26px; font-weight: 700;
+        letter-spacing: -0.02em;
+        margin: 0 0 8px;
+        color: var(--text);
+      }
+      .whatsnew-lead {
+        font-size: 13px; color: var(--text-dim);
+        margin: 0; line-height: 1.5;
+      }
+      .whatsnew-list {
+        flex: 1; overflow-y: auto;
+        padding: 16px 20px;
+        display: flex; flex-direction: column; gap: 14px;
+      }
+      .whatsnew-item {
+        display: flex; gap: 14px;
+        padding: 14px;
+        background: rgba(255,255,255,0.02);
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        transition: all .15s ease;
+      }
+      .whatsnew-item:hover {
+        background: rgba(255,255,255,0.04);
+        border-color: var(--border-strong);
+      }
+      .whatsnew-item-icon {
+        width: 36px; height: 36px;
+        border-radius: 10px;
+        background: var(--accent-soft);
+        color: var(--accent);
+        display: flex; align-items: center; justify-content: center;
+        flex-shrink: 0;
+      }
+      .whatsnew-item-body { flex: 1; min-width: 0; }
+      .whatsnew-item-title {
+        font-size: 14px; font-weight: 600;
+        color: var(--text); margin-bottom: 4px;
+        line-height: 1.3;
+      }
+      .whatsnew-item-detail {
+        font-size: 12px;
+        color: var(--text-dim);
+        line-height: 1.5;
+      }
+      .whatsnew-footer {
+        padding: 16px 20px;
+        padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 16px);
+        border-top: 1px solid var(--border);
+        background: rgba(11,13,16,0.4);
       }
     `}</style>
   );
