@@ -273,7 +273,7 @@ function AuthScreen() {
             </div>
           </div>
           <div className="login-brand-meta">
-            <span className="dot" />LIVE · V1.0
+            <span className="dot" />LIVE · V{APP_VERSION}
           </div>
         </div>
 
@@ -283,12 +283,9 @@ function AuthScreen() {
             <div className="login-descriptor">On Field &amp; Site Management</div>
             <div className="login-subtitle">Site Evolution</div>
             <p className="login-tagline">Building the future of logistics.</p>
-            <div className="login-version-badge">
-              <span className="login-version-dot"/>
-              VERSION {APP_VERSION}
-            </div>
             <div className="login-credit">
               <span>Created by</span> <strong>Lorenzo Luceno</strong>
+              <span className="login-version-chip">v{APP_VERSION}</span>
             </div>
           </div>
 
@@ -2280,29 +2277,18 @@ function StyleTag() {
         font-weight: 500;
         letter-spacing: 0.08em;
       }
-      .login-version-badge {
-        display: inline-flex;
-        align-items: center;
-        gap: 8px;
-        margin-top: 22px;
-        padding: 8px 14px;
-        background: linear-gradient(135deg, rgba(227,6,19,0.25) 0%, rgba(227,6,19,0.12) 100%);
-        border: 1px solid rgba(227,6,19,0.5);
+      .login-version-chip {
+        margin-left: 6px;
+        padding: 2px 7px;
         border-radius: 999px;
-        color: #fff;
+        background: rgba(227,6,19,0.18);
+        border: 1px solid rgba(227,6,19,0.4);
+        color: rgba(255,255,255,0.85);
         font-family: 'IBM Plex Mono', monospace;
-        font-size: 12px;
+        font-size: 9px;
         font-weight: 600;
-        letter-spacing: 0.2em;
-        box-shadow: 0 0 24px rgba(227,6,19,0.3), 0 0 0 1px rgba(255,255,255,0.04) inset;
-        text-shadow: 0 1px 8px rgba(0,0,0,0.6);
-      }
-      .login-version-dot {
-        width: 8px; height: 8px;
-        border-radius: 50%;
-        background: var(--leo-red);
-        box-shadow: 0 0 12px var(--leo-red);
-        animation: pulseDot 1.6s ease-in-out infinite;
+        letter-spacing: 0.08em;
+        text-transform: lowercase;
       }
 
       .login-form { display: flex; flex-direction: column; gap: 10px; }
